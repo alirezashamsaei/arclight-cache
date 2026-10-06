@@ -1,0 +1,20 @@
+<?php
+// Arclight Cache — tools template (original markup).
+defined('ABSPATH') || exit;
+/** @var array $stats */
+?>
+<div class="wrap arclight-wrap">
+  <h1>Arclight Tools</h1>
+  <div class="card">
+    <h2>Flush</h2>
+    <p><code>wp arclight flush</code> — clears memory tier and Redis DB.</p>
+  </div>
+  <div class="card">
+    <h2>Prefetch tuning</h2>
+    <p>Use <code>prefetch( $keys, $group )</code> for hot key batches; watch hit-rate delta in <code>wp arclight digest</code>.</p>
+  </div>
+  <div class="card">
+    <h2>Status</h2>
+    <pre><?php echo esc_html(wp_json_encode($stats, JSON_PRETTY_PRINT)); ?></pre>
+  </div>
+</div>

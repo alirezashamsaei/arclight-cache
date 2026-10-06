@@ -1,0 +1,16 @@
+<?php
+// Arclight Cache — dashboard widget template (original markup).
+defined('ABSPATH') || exit;
+/** @var array $stats */
+$persistent = ! empty($stats['persistent']);
+$metrics = isset($stats['metrics']) && is_array($stats['metrics']) ? $stats['metrics'] : array();
+?>
+<div class="arclight-widget">
+  <p><strong><?php echo $persistent ? 'Persistent' : 'Non-persistent'; ?></strong>
+  · memory keys: <?php echo (int) (isset($stats['memory_keys']) ? $stats['memory_keys'] : 0); ?></p>
+  <?php if ($metrics) : ?>
+  <p>Hit rate: <?php echo esc_html((string) $metrics['hit_rate']); ?>
+  (<?php echo (int) $metrics['hits']; ?>/<?php echo (int) $metrics['total']; ?>)</p>
+  <?php endif; ?>
+  <p><a href="<?php echo esc_url(admin_url('options-general.php?page=arclight-cache')); ?>">Details</a></p>
+</div>

@@ -1,0 +1,142 @@
+<?php
+// Arclight Cache — unified dashboard: status + graph + browser + config + tools.
+defined('ABSPATH') || exit;
+/** @var array $stats, $config, $sources, $totals, $server, $browser, $series, $msg, $testReport */
+/** @var bool $constantManaged */
+$persistent = ! empty($stats['persistent']);
+$metrics = isset($stats['metrics']) && is_array($stats['metrics']) ? $stats['metrics'] : array();
+$hits = isset($totals['hits']) ? (int) $totals['hits'] : 0;
+$misses = isset($totals['misses']) ? (int) $totals['misses'] : 0;
+$requests = $hits + $misses;
+$rate = $requests > 0 ? round(100 * $hits / $requests, 1) : 0;
+$flushUrl = wp_nonce_url(add_query_arg(array('page' => 'arclight-cache', 'arclight_action' => 'flush'), admin_url('options-general.php')), 'arclight_flush');
+$testUrl = wp_nonce_url(add_query_arg(array('page' => 'arclight-cache', 'arclight_action' => 'test'), admin_url('options-general.php')), 'arclight_test');
+$notes = array(
+    'flushed' => array('success', 'Cache flushed (memory + Redis DB).'),
+    'flush-failed' => array('error', 'Flush failed — see error log.'),
+    'test-pass' => array('success', 'Connection test passed.'),
+    'test-failed' => array('error', 'Connection test failed — details below.'),
+    'test-fail' => array('error', 'Connection test failed — details below.'),
+);
+?>
+<div class="wrap arclight-wrap">
+  <h1>Arclight Cache</h1>
+
+  <?php if ($msg !== '' && isset($notes[$msg])) : ?>
+  <div class="notice notice-<?php echo esc_attr($notes[$msg][0]); ?> is-dismissible"><p><?php echo esc_html($notes[$msg][1]); ?></p></div>
+  <?php endif; ?>
+
+  <div class="arclight-grid">
+    <div class="arclight-card arclight-status-<?php echo $persistent ? 'ok' : 'warn'; ?>">
+      <h2>Status</h2>
+      <p class="arclight-big"><?php echo $persistent ? 'Persistent' : 'Fallback'; ?></p>
+      <p><?php echo $persistent ? 'Redis-backed object cache is active.' : 'Non-persistent in-memory fallback. Check connection.'; ?></p>
+      <p>
+        <a class="button button-primary" href="<?php echo esc_url($flushUrl); ?>">Flush cache</a>
+        <a class="button" href="<?php echo esc_url($testUrl); ?>">Test connection</a>
+      </p>
+    </div>
+
+    <div class="arclight-card">
+      <h2>Requests <span class="arclight-sub">(lifetime, all requests)</span></h2>
+      <p class="arclight-big"><?php echo number_format($requests); ?></p>
+      <p>Hits <strong><?php echo number_format($hits); ?></strong> · Misses <strong><?php echo number_format($misses); ?></strong> · Hit rate <strong><?php echo esc_html((string) $rate); ?>%</strong></p>
+      <?php if ($metrics) : ?>
+      <p class="arclight-sub">This request: <?php echo (int) $metrics['hits']; ?> hits / <?php echo (int) $metrics['misses']; ?> misses · p50 <?php echo esc_html((string) $metrics['p50_ms']); ?> ms</p>
+      <?php endif; ?>
+      <?php if (! empty($server['keyspace_hits']) || ! empty($server['keyspace_misses'])) : ?>
+      <p class="arclight-sub">Redis server: <?php echo esc_html((string) (isset($server['keyspace_hits']) ? $server['keyspace_hits'] : '?')); ?> hits / <?php echo esc_html((string) (isset($server['keyspace_misses']) ? $server['keyspace_misses'] : '?')); ?> misses
+      · mem <?php echo esc_html((string) (isset($server['used_memory_human']) ? $server['used_memory_human'] : '?')); ?>
+      · clients <?php echo esc_html((string) (isset($server['connected_clients']) ? $server['connected_clients'] : '?')); ?></p>
+      <?php endif; ?>
+    </div>
+  </div>
+
+  <div class="arclight-card">
+    <h2>Requests / hits / misses over time <span class="arclight-sub">(5-min buckets, last 24h)</span></h2>
+    <?php if (empty($series)) : ?>
+    <p class="arclight-sub">No samples yet — traffic is recorded on shutdown of each cached request. Load a few pages, then reload this screen.</p>
+    <?php else : ?>
+    <canvas id="arclight-graph" width="900" height="220"></canvas>
+    <div class="arclight-legend"><span class="sw sw-req"></span>requests <span class="sw sw-hit"></span>hits <span class="sw sw-miss"></span>misses</div>
+    <?php endif; ?>
+  </div>
+
+  <?php if (! empty($testReport) && is_array($testReport)) : ?>
+  <div class="arclight-card">
+    <h2>Connection test: <?php echo esc_html($testReport['status']); ?></h2>
+    <table class="widefat striped"><tbody>
+      <?php foreach ($testReport['checks'] as $c) : ?>
+      <tr><td><?php echo $c['ok'] ? '✓' : '✗'; ?></td><th><?php echo esc_html($c['name']); ?></th><td><?php echo esc_html($c['detail']); ?></td></tr>
+      <?php endforeach; ?>
+    </tbody></table>
+  </div>
+  <?php endif; ?>
+
+  <div class="arclight-grid">
+    <div class="arclight-card">
+      <h2>Redis contents <span class="arclight-sub">(SCAN sample, grouped)</span></h2>
+      <?php if (empty($browser['available'])) : ?>
+      <p class="arclight-sub">Unavailable — no live connection from this admin request.</p>
+      <?php else : ?>
+      <table class="widefat striped"><thead><tr><th>Group</th><th>Sampled keys</th></tr></thead><tbody>
+        <?php foreach ($browser['groups'] as $g => $n) : ?>
+        <tr><th><?php echo esc_html($g); ?></th><td><?php echo (int) $n; ?></td></tr>
+        <?php endforeach; ?>
+      </tbody></table>
+      <?php if (! empty($browser['inspected'])) : ?>
+      <h3>Sampled keys</h3>
+      <table class="widefat striped"><thead><tr><th>Key</th><th>Type</th><th>TTL</th><th>Size</th></tr></thead><tbody>
+        <?php foreach ($browser['inspected'] as $k => $info) : ?>
+        <tr><td><code><?php echo esc_html($k); ?></code></td>
+          <td><?php echo esc_html(isset($info['type_name']) ? $info['type_name'] : '?'); ?></td>
+          <td><?php echo esc_html(isset($info['ttl']) ? (string) $info['ttl'] : '?'); ?></td>
+          <td><?php echo esc_html(isset($info['fields']) ? $info['fields'] . ' fields' : (isset($info['bytes']) ? $info['bytes'] . ' B' : '—')); ?></td></tr>
+        <?php endforeach; ?>
+      </tbody></table>
+      <?php endif; ?>
+      <?php if (! empty($browser['truncated'])) : ?><p class="arclight-sub">Sample truncated at 60 keys — refine prefix grouping for full inventory.</p><?php endif; ?>
+      <?php endif; ?>
+    </div>
+
+    <div class="arclight-card">
+      <h2>Tools</h2>
+      <p><a class="button button-primary" href="<?php echo esc_url($flushUrl); ?>">Flush cache</a></p>
+      <p class="arclight-sub">Clears the in-memory tier and the Redis DB. Prefetch hot catalog batches with <code>prefetch( $keys, $group )</code>; watch hit-rate delta in <code>wp arclight digest</code>.</p>
+      <h3>Live status</h3>
+      <pre><?php echo esc_html(wp_json_encode($stats, JSON_PRETTY_PRINT)); ?></pre>
+    </div>
+  </div>
+
+  <div class="arclight-card">
+    <h2>Connection settings</h2>
+    <?php if ($constantManaged) : ?>
+    <div class="notice notice-warning inline"><p><code>ARCLIGHT_CACHE_CONFIG</code> constant is defined — it overrides dashboard settings. Remove the constant to manage from here.</p></div>
+    <?php endif; ?>
+    <form method="post" action="options.php">
+      <?php settings_fields('arclight_cache'); ?>
+      <?php $db = get_option('arclight_cache_settings', array()); if (! is_array($db)) { $db = array(); } ?>
+      <?php $val = function ($k, $dflt) use ($db) { return isset($db[$k]) ? $db[$k] : $dflt; }; ?>
+      <table class="form-table"><tbody>
+        <tr><th>Host</th><td><input name="arclight_cache_settings[host]" value="<?php echo esc_attr($val('host', '127.0.0.1')); ?>" class="regular-text" /> <span class="arclight-sub">src: <?php echo esc_html(isset($sources['host']) ? $sources['host'] : '?'); ?></span></td></tr>
+        <tr><th>Port</th><td><input name="arclight_cache_settings[port]" type="number" min="1" max="65535" value="<?php echo esc_attr($val('port', 6379)); ?>" /></td></tr>
+        <tr><th>Database</th><td><input name="arclight_cache_settings[database]" type="number" min="0" max="31" value="<?php echo esc_attr($val('database', 0)); ?>" /></td></tr>
+        <tr><th>Username</th><td><input name="arclight_cache_settings[username]" value="<?php echo esc_attr($val('username', '')); ?>" class="regular-text" autocomplete="off" /></td></tr>
+        <tr><th>Password</th><td><input name="arclight_cache_settings[password]" type="password" value="__KEEP__" class="regular-text" autocomplete="new-password" /> <span class="arclight-sub">blank = clear; untouched = keep</span></td></tr>
+        <tr><th>Prefix</th><td><input name="arclight_cache_settings[prefix]" value="<?php echo esc_attr($val('prefix', 'arclight')); ?>" /> <span class="arclight-sub">changing prefix orphans old keys — flush after</span></td></tr>
+        <tr><th>Timeouts</th><td>connect <input name="arclight_cache_settings[timeout]" type="number" step="0.05" min="0.05" max="10" value="<?php echo esc_attr($val('timeout', 1.0)); ?>" size="5" />s
+          read <input name="arclight_cache_settings[read_timeout]" type="number" step="0.05" min="0.05" max="10" value="<?php echo esc_attr($val('read_timeout', 1.0)); ?>" size="5" />s</td></tr>
+        <tr><th>Retries / backoff</th><td><input name="arclight_cache_settings[retries]" type="number" min="0" max="5" value="<?php echo esc_attr($val('retries', 2)); ?>" size="3" />
+          <input name="arclight_cache_settings[backoff_ms]" type="number" min="0" max="2000" value="<?php echo esc_attr($val('backoff_ms', 100)); ?>" size="5" /> ms base (jittered)</td></tr>
+        <tr><th>Ignored groups</th><td><input name="arclight_cache_settings[ignored_groups]" value="<?php echo esc_attr(is_array($val('ignored_groups', array())) ? implode(', ', $val('ignored_groups', array())) : $val('ignored_groups', '')); ?>" class="regular-text" /> <span class="arclight-sub">comma-separated, memory-only</span></td></tr>
+        <tr><th>Options</th><td>
+          <label><input name="arclight_cache_settings[split_alloptions]" type="checkbox" value="1" <?php checked(! empty($val('split_alloptions', true))); ?> /> single-hash options group</label><br />
+          <label><input name="arclight_cache_settings[metrics]" type="checkbox" value="1" <?php checked(! empty($val('metrics', true))); ?> /> record metrics</label><br />
+          <label><input name="arclight_cache_settings[tls]" type="checkbox" value="1" <?php checked(! empty($val('tls', false))); ?> /> TLS</label>
+        </td></tr>
+      </tbody></table>
+      <?php submit_button('Save & test connection'); ?>
+    </form>
+    <p class="arclight-sub">Saving validates each field; the drop-in picks up new settings on the next request (no CLI needed). Use “Test connection” for a live doctor report.</p>
+  </div>
+</div>
